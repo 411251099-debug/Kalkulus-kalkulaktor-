@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kalkulator Kalkulus</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{
+  font-family:Poppins,sans-serif;
+  background:linear-gradient(135deg,#6366f1,#3b82f6);
+  min-height:100vh;
+  margin:0;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+}
+.container{
+  background:#fff;
+  width:100%;
+  max-width:760px;
+  padding:30px;
+  border-radius:18px;
+  position:relative;
+  z-index:1;
+}
+input,select,button{
+  width:100%;
+  padding:14px;
+  margin-top:12px;
+  border-radius:12px;
+  border:1px solid #ccc;
+}
+button{
+  background:#4f46e5;
+  color:#fff;
+  border:none;
+  cursor:pointer;
+  font-size:16px;
+}
+.card{
+  margin-top:20px;
+  padding:18px;
+  border-radius:14px;
+  background:#f9fafb;
+}
+
+/* MASKOT */
+#mascot{
+  position:fixed;
+  right:30px;
+  bottom:30px;
+  font-size:72px;
+  animation:float 3s ease-in-out infinite;
+  pointer-events:none;
+  z-index:20000;
+}
+@keyframes float{
+  0%,100%{transform:translateY(0)}
+  50%{transform:translateY(-10px)}
+}
+
+/* TOUR */
+.tour-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.55);
+  z-index:9999;
+  display:none;
+}
+.tour-focus{
+  position:relative;
+  z-index:10000;
+  box-shadow:0 0 0 6px #fde047;
+  border-radius:14px;
+}
+.tour-box{
+  position:fixed;
+  bottom:90px;
+  left:50%;
+  transform:translateX(-50%);
+  background:#fff;
+  padding:20px;
+  border-radius:16px;
+  max-width:380px;
+  text-align:center;
+  z-index:10001;
+}
+.tour-actions{
+  display:flex;
+  justify-content:space-between;
+  margin-top:14px;
+}
+.tour-actions button{
+  padding:10px 16px;
+  border-radius:10px;
+}
+.skip{
+  background:#e5e7eb;
+  color:#111;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+  <h2>📐 Kalkulator Kalkulus</h2>
+
+  <input id="func" placeholder="contoh: 2x^3 + 3x^2 - 5x + 4">
+
+  <select id="mode">
+    <option value="turunan">Turunan</option>
+    <option value="integral">Integral</option>
+  </select>
+
+  <button onclick="hitung()">Hitung</button>
+
+  <div class="card" id="hasilBox">
+    <b>Hasil:</b>
+    <div id="hasil">—</div>
+  </div>
+
+  <div class="card" id="langkahBox">
+    <b>Langkah Penyelesaian:</b>
+    <div id="langkah">—</div>
+  </div>
+
+  <div class="card" id="grafikBox">
+    <b>Grafik:</b>
+    <canvas id="grafik"></canvas>
+  </div>
+</div>
+
+<div id="mascot">🦊</div>
+
+<!-- TOUR -->
+<div class="tour-overlay" id="tourOverlay">
+  <div class="tour-box">
+    <div id="tourText"></div>
+    <div class="tour-actions">
+      <button class="skip" onclick="endTour()">Skip</button>
+      <button onclick="nextTour()">Next</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let chart;
+
+/* ===== FORMAT MATEMATIKA ===== */
+const supMap="⁰¹²³⁴⁵⁶⁷⁸⁹";
+const fracMap={"1/2":"½","3/2":"³⁄₂","5/2":"⁵⁄₂","1/3":"⅓","2/3":"⅔","1/4":"¼","3/4":"¾"};
+
+function sup(n){return n.toString().split('').map(d=>supMap[d]).join('');}
+function toFraction(x){
+  if(Number.isInteger(x)) return x.toString();
+  const d=1000000,n=Math.round(x*d);
+  const g=(a,b)=>b?g(b,a%b):a;
+  const k=g(n,d);
+  return fracMap[(n/k)+"/"+(d/k)]||(n/k+"/"+d/k);
+}
+
+/* ===== PARSER ===== */
+function parsePoly(expr){
+  expr=expr.replace(/\s+/g,'').replace(/-/g,'+-');
+  if(expr[0]==='+')expr=expr.slice(1);
+  return expr.split('+').map(t=>{
+    if(t.includes('x')){
+      let c=t.match(/^([\-]?\d*)x/)[1];
+      if(c===''||c==='+')c=1;if(c==='-')c=-1;
+      let p=t.includes('^')?Number(t.split('^')[1]):1;
+      return{coef:Number(c),pow:p};
+    }
+    return{coef:Number(t),pow:0};
+  });
+}
+
+const derivative=p=>p.filter(t=>t.pow).map(t=>({coef:t.coef*t.pow,pow:t.pow-1}));
+const integral=p=>p.map(t=>({coef:t.coef/(t.pow+1),pow:t.pow+1}));
+
+function polyToMath(p,isInt=false){
+  let s="";
+  p.forEach(t=>{
+    if(!t.coef)return;
+    let sign=t.coef>0?" + ":" − ";
+    let c=Math.abs(t.coef);
+    let cs=(c===1&&t.pow)?"" : toFraction(c);
+    let term=t.pow===0?cs:t.pow===1?cs+"x":cs+"x"+sup(t.pow);
+    s+=sign+term;
+  });
+  s=s.replace(/^ \+ /,'');
+  return isInt?s+" + C":s;
+}
+
+function evalPoly(p,x){return p.reduce((s,t)=>s+t.coef*Math.pow(x,t.pow),0);}
+
+/* ===== HITUNG (LANGKAH PANJANG) ===== */
+function hitung(){
+  const poly=parsePoly(func.value);
+  const mode=modeSelect.value;
+  const res=mode==="turunan"?derivative(poly):integral(poly);
+
+  hasil.innerText=polyToMath(res,mode==="integral");
+
+  langkah.innerHTML = `
+  <ol>
+    <li>Diketahui fungsi awal:<br><b>f(x) = ${func.value}</b></li>
+    <li>Fungsi diuraikan menjadi beberapa suku berdasarkan pangkat x.</li>
+    <li>Setiap suku dihitung ${mode==="turunan"?"turunannya":"integralnya"} menggunakan aturan pangkat.</li>
+    <li>Hasil dari setiap suku digabungkan menjadi satu fungsi baru.</li>
+    <li>${mode==="integral"?"Karena ini integral tak tentu, ditambahkan konstanta integrasi C.":""}</li>
+    <li>Jadi, hasil akhir ${mode==="turunan"?"turunan":"integral"} dari fungsi adalah:<br>
+        <b>${polyToMath(res,mode==="integral")}</b>
+    </li>
+  </ol>
+  `;
+
+  const xs=[],y1=[],y2=[];
+  for(let x=-5;x<=5;x++){
+    xs.push(x);
+    y1.push(evalPoly(poly,x));
+    y2.push(evalPoly(res,x));
+  }
+
+  if(chart)chart.destroy();
+  chart=new Chart(grafik,{
+    type:'line',
+    data:{labels:xs,datasets:[
+      {label:'f(x)',data:y1,borderWidth:3},
+      {label:mode==="turunan"?"f′(x)":"∫f(x)dx",data:y2,borderWidth:3,borderDash:[6,4]}
+    ]}
+  });
+}
+
+/* ===== ONBOARD ===== */
+const steps=[
+  {el:"func",text:"Masukkan fungsi matematika di sini"},
+  {el:"hasilBox",text:"Hasil perhitungan ditampilkan di sini"},
+  {el:"langkahBox",text:"Langkah penyelesaian dijelaskan secara rinci"},
+  {el:"grafikBox",text:"Grafik fungsi dan hasilnya ditampilkan"}
+];
+let stepIndex=0;
+const modeSelect=document.getElementById("mode");
+
+function startTour(){
+  tourOverlay.style.display="block";
+  stepIndex=0; showStep();
+}
+function showStep(){
+  document.querySelectorAll(".tour-focus").forEach(e=>e.classList.remove("tour-focus"));
+  const s=steps[stepIndex];
+  document.getElementById(s.el).classList.add("tour-focus");
+  tourText.innerText="🦊 "+s.text;
+}
+function nextTour(){
+  stepIndex++;
+  if(stepIndex>=steps.length){ endTour(); return; }
+  showStep();
+}
+function endTour(){
+  document.querySelectorAll(".tour-focus").forEach(e=>e.classList.remove("tour-focus"));
+  tourOverlay.style.display="none";
+}
+
+setTimeout(startTour,600);
+</script>
+
+</body>
+</html>
